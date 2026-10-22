@@ -1,7 +1,6 @@
 local module = ... or D:module("PDTH++")
 
--- Wire compatibility, NOT the release/version number. Only change this when
--- peers cannot safely interpret each other's units or network messages.
+-- Keep the wire protocol separate, but require the same release as well.
 -- Protocol 2 introduces instance-bound, idempotent sentry pickup transactions.
 module.PDTHPP_NETWORK_PROTOCOL = "2"
 module.PDTHPP_PROTOCOL_PREFIX = "pdthpp_protocol_"
@@ -13,6 +12,7 @@ end
 function module:pdthpp_protocol_token()
 	local build = self:pdthpp_game_build()
 	return build and self.PDTHPP_PROTOCOL_PREFIX .. self.PDTHPP_NETWORK_PROTOCOL .. "-game-" .. build
+		.. "-release-" .. tostring(self:version())
 end
 
 function module:pdthpp_clean_protocol_tokens(dlcs)
@@ -31,9 +31,13 @@ function module:pdthpp_clean_protocol_tokens(dlcs)
 	end
 	local reason = #markers == 0 and "missing" or "protocol"
 	if #markers == 1 then
-		local protocol, build = markers[1]:match("^pdthpp_protocol_([%w.]+)%-game%-([%w.]+)$")
-		if protocol == self.PDTHPP_NETWORK_PROTOCOL and build ~= self:pdthpp_game_build() then
-			reason = "game"
+		local protocol, build, release = markers[1]:match("^pdthpp_protocol_([%w.]+)%-game%-(.-)%-release%-(.+)$")
+		if protocol == self.PDTHPP_NETWORK_PROTOCOL then
+			if build ~= self:pdthpp_game_build() then
+				reason = "game"
+			elseif release ~= tostring(self:version()) then
+				reason = "version"
+			end
 		end
 	end
 	return valid, reason, table.concat(cleaned, " ")

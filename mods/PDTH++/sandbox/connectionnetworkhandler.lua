@@ -85,7 +85,7 @@ module:hook(ConnectionNetworkHandler, "join_request_reply", function(self, reply
 	local reason = type(mask) == "string" and mask:match("^pdthpp_reject_(%a+)$")
 	if reply == 2 and server and user_id == server:user_id()
 		and (not server:ip() or sender:ip_at_index(0) == server:ip())
-		and (reason == "missing" or reason == "protocol" or reason == "game") then
+		and (reason == "missing" or reason == "protocol" or reason == "game" or reason == "version") then
 		module._pdthpp_join_rejection = { reason = reason, t = Application:time() }
 	end
 	local result = module:call_orig(ConnectionNetworkHandler, "join_request_reply", self,

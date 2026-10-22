@@ -65,7 +65,7 @@ function SentryGunInteractionExt:_at_interact_interupt(player)
 end
 
 -- 长按完成后的正式回收入口。
--- 客机把具体步哨网络 ID 发给主机；主机验证成功后，客机才按先前锁定的方案扣弹并返还设备。
+-- 客机先按锁定方案暂扣弹药，再请求主机回收指定步哨；成功返还设备，明确失败才退费。
 function SentryGunInteractionExt:interact(player)
 	SentryGunInteractionExt.super.super.interact(self, player)
 	local session = managers.network and managers.network:session()

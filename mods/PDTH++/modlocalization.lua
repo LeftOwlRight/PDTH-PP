@@ -54,8 +54,12 @@ local replacements = {
 		chinese = "房主要求安装 PDTH++。请安装网络协议兼容的版本后再加入。",
 	},
 	["pdthpp_join_incompatible_protocol"] = {
-		english = "The PDTH++ network protocols are incompatible. Update to a compatible build; release version numbers do not have to match.",
-		chinese = "双方 PDTH++ 的网络协议不兼容，请更新到兼容协议的版本。模组发布版本号无需完全相同。",
+		english = "The PDTH++ network protocols are incompatible. Install the same PDTH++ version as the host.",
+		chinese = "双方 PDTH++ 的网络协议不兼容，请安装与房主相同的 PDTH++ 版本。",
+	},
+	["pdthpp_join_incompatible_version"] = {
+		english = "The PDTH++ versions differ. Install exactly the same PDTH++ version as the host before joining.",
+		chinese = "双方 PDTH++ 版本不同，请安装与房主完全相同的 PDTH++ 版本后再加入。",
 	},
 	["pdthpp_join_incompatible_game"] = {
 		english = "The game versions are incompatible. Update PAYDAY: The Heist before joining.",
@@ -75,8 +79,8 @@ local replacements = {
 		spanish = "Aislamiento en línea",
 	},
 	["network_isolation_help"] = {
-		english = "While hosting, require compatible PDTH++ and game network protocols. PDTH++ release numbers may differ. Lobby isolation remains enabled when this option is off.",
-		chinese = "启用时，房主只接受游戏和 PDTH++ 网络协议兼容的玩家；模组发布版本号可以不同。关闭此项仍保留大厅隔离。",
+		english = "While hosting, require the same PDTH++ release and compatible game/network protocols. Lobby version isolation remains enabled when this option is off.",
+		chinese = "启用时，房主只接受 PDTH++ 发布版本完全相同且游戏和网络协议兼容的玩家。关闭此项仍保留大厅版本隔离。",
 		spanish = "Al activarlo impide que otros jugadores sin el mod se unan cuando hosteas.",
 	},
 	["sentry_multi_part_reachability"] = {

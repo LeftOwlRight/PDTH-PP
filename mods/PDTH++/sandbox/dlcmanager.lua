@@ -2,7 +2,7 @@
 PDTH++ 客户端协议标记注入。
 复用原版加入请求必带的空格分隔 DLC 字符串追加 `pdthpp_protocol_N`，
 因此即使其他模组替换了 ClientNetworkSession 的加入函数，只要仍调用 dlcs_string()，
-PDTH++ 标记就会随请求发送。协议号只在网络格式真正不兼容时递增。
+PDTH++ 标记就会随请求发送。标记同时包含网络协议、游戏版本和模组发布版本。
 ]]
 
 local module = ... or D:module("PDTH++")
