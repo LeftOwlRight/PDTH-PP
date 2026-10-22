@@ -1,8 +1,8 @@
 --[[
 步哨回收交互与部署物交互扩展。
 步哨回收费在玩家开始长按互动时根据当时的剩余弹药比例报价并锁定，
-中途取消不扣费，完成回收后才真正扣除玩家武器弹药。
-主机负责验证所有权并销毁指定步哨；客机只保存本地扣费方案并等待主机结果。
+中途取消不扣费；完成交互后暂扣费用，主机拒绝时退还。
+主机负责验证所有权并销毁指定步哨；客机在发请求前暂扣费用，收到成功结果后只返还设备。
 本文件同时承载步哨交互提示的 HUD 追加，原因是自定义交互类在此处才完成创建。
 ]]
 
@@ -36,7 +36,13 @@ function SentryGunInteractionExt:_interact_blocked(player)
 		or data.amount >= 1
 		or not local_peer
 		or owner_peer_id ~= local_peer:id()
-		or self._pdthpp_pickup_requested then
+		or self._pdthpp_pickup_requested
+		or module:pdthpp_sentry_pickup_pending() then
+		return true
+	end
+
+	if Network:is_client() and not module:pdthpp_sentry_instance(self._unit) then
+		module:pdthpp_request_exact_sentry_status(self._unit, false)
 		return true
 	end
 
@@ -83,18 +89,7 @@ function SentryGunInteractionExt:interact(player)
 	end
 
 	if Network:is_client() then
-		local server_peer = session:server_peer()
-		if not server_peer then
-			return false
-		end
-		local unit_id = self._unit:id()
-		self._pdthpp_pickup_requested = true
-		module._pdthpp_pending_sentry_pickup_costs[unit_id] = plan
-		DNet:send_to_peer(server_peer, "PDTHPPSentryPickupRequest", {
-			module = module:id(),
-			unit_id = unit_id,
-		}, false, true)
-		return true
+		return module:pdthpp_begin_sentry_pickup(self._unit, plan)
 	end
 
 	return module:pdthpp_host_process_sentry_pickup(local_peer, self._unit, plan)

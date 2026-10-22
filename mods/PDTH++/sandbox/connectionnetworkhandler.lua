@@ -8,31 +8,6 @@ PDTH++ 主机侧联机隔离。
 local module = ... or D:module("PDTH++")
 local ConnectionNetworkHandler = module:hook_class("ConnectionNetworkHandler")
 
--- Must match sandbox/dlcmanager.lua.
-local PDTHPP_NETWORK_PROTOCOL = module:version()
-local PDTHPP_PROTOCOL_PREFIX = "pdthpp_protocol_"
-local PDTHPP_PROTOCOL_TOKEN = PDTHPP_PROTOCOL_PREFIX .. tostring(PDTHPP_NETWORK_PROTOCOL)
-
--- 一次遍历同时完成协议验证和字符串清洗；任何 pdthpp_protocol_* 标记都不会交给原版 DLC 逻辑。
-local function remove_and_verify_protocol_token(dlcs)
-	local cleaned = {}
-	local valid_protocol = false
-	local has_pdthpp_token = false
-
-	for token in string.gmatch(dlcs or "", "%S+") do
-		if string.sub(token, 1, string.len(PDTHPP_PROTOCOL_PREFIX)) == PDTHPP_PROTOCOL_PREFIX then
-			has_pdthpp_token = true
-			if token == PDTHPP_PROTOCOL_TOKEN then
-				valid_protocol = true
-			end
-		else
-			table.insert(cleaned, token)
-		end
-	end
-
-	return valid_protocol, has_pdthpp_token, table.concat(cleaned, " ")
-end
-
 -- 旧配置中不存在该选项时默认开启，以保持首次加入此功能版本时的隔离行为。
 local function network_isolation_enabled()
 	local enabled = D:conf("network_isolation")
@@ -59,7 +34,7 @@ local function reject_incompatible_join(peer_name, sender, reason)
 
 	if sender then
 		-- Reply 2 is the vanilla rejected/kicked response. No peer has been created yet.
-		sender:join_request_reply(2, 0, 1, 1, 0, "", my_user_id)
+		sender:join_request_reply(2, 0, 1, 1, 0, "pdthpp_reject_" .. reason, my_user_id)
 	end
 end
 
@@ -75,12 +50,12 @@ module:hook(ConnectionNetworkHandler, "request_join", function(self, peer_name, 
 		return
 	end
 
-	local valid_protocol, has_pdthpp_token, cleaned_dlcs = remove_and_verify_protocol_token(dlcs)
+	local valid_protocol, reason, cleaned_dlcs = module:pdthpp_clean_protocol_tokens(dlcs)
 	if network_isolation_enabled() and not valid_protocol then
 		reject_incompatible_join(
 			peer_name,
 			sender,
-			has_pdthpp_token and "PDTH++ protocol mismatch" or "PDTH++ protocol token missing"
+			reason
 		)
 		return
 	end
@@ -100,4 +75,21 @@ module:hook(ConnectionNetworkHandler, "request_join", function(self, peer_name, 
 		host_user_id,
 		sender
 	)
+end, true)
+
+-- Store the rejection only around the synchronous vanilla callback. Arbitrary
+-- senders must not be able to leave a stale reason for an unrelated kick dialog.
+module:hook(ConnectionNetworkHandler, "join_request_reply", function(self, reply, id, level, difficulty, state, mask, user_id, sender)
+	local session = managers.network and managers.network:session()
+	local server = session and session:server_peer()
+	local reason = type(mask) == "string" and mask:match("^pdthpp_reject_(%a+)$")
+	if reply == 2 and server and user_id == server:user_id()
+		and (not server:ip() or sender:ip_at_index(0) == server:ip())
+		and (reason == "missing" or reason == "protocol" or reason == "game") then
+		module._pdthpp_join_rejection = { reason = reason, t = Application:time() }
+	end
+	local result = module:call_orig(ConnectionNetworkHandler, "join_request_reply", self,
+		reply, id, level, difficulty, state, mask, user_id, sender)
+	module._pdthpp_join_rejection = nil
+	return result
 end, true)

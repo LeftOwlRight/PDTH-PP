@@ -46,14 +46,37 @@ local replacements = {
 		spanish = "La sensibilidad que tienes cuando haces zoom con el M308.",
 	},
 	-- 联机隔离与步哨多部位检测设置文本。
+	["pdthpp_join_incompatible_title"] = {
+		english = "PDTH++ connection requirements", chinese = "PDTH++ 联机要求",
+	},
+	["pdthpp_join_incompatible_missing"] = {
+		english = "This host requires PDTH++. Install a compatible network-protocol build before joining.",
+		chinese = "房主要求安装 PDTH++。请安装网络协议兼容的版本后再加入。",
+	},
+	["pdthpp_join_incompatible_protocol"] = {
+		english = "The PDTH++ network protocols are incompatible. Update to a compatible build; release version numbers do not have to match.",
+		chinese = "双方 PDTH++ 的网络协议不兼容，请更新到兼容协议的版本。模组发布版本号无需完全相同。",
+	},
+	["pdthpp_join_incompatible_game"] = {
+		english = "The game versions are incompatible. Update PAYDAY: The Heist before joining.",
+		chinese = "双方游戏版本不兼容，请先更新 PAYDAY: The Heist。",
+	},
+	["pdthpp_sentry_pickup_failed"] = {
+		english = "Sentry pickup was rejected. Reserved ammunition has been refunded.",
+		chinese = "步哨回收未获确认，暂扣弹药已退还。",
+	},
+	["pdthpp_sentry_pickup_waiting"] = {
+		english = "Waiting for the host to confirm or cancel the sentry pickup.",
+		chinese = "正在等待主机确认或取消步哨回收。",
+	},
 	["network_isolation"] = {
 		english = "Online isolation",
 		chinese = "联机隔离",
 		spanish = "Aislamiento en línea",
 	},
 	["network_isolation_help"] = {
-		english = "When enabled, prevent players without the mod from joining while hosting.",
-		chinese = "启用时，作为主机阻止没安装mod的玩家加入。",
+		english = "While hosting, require compatible PDTH++ and game network protocols. PDTH++ release numbers may differ. Lobby isolation remains enabled when this option is off.",
+		chinese = "启用时，房主只接受游戏和 PDTH++ 网络协议兼容的玩家；模组发布版本号可以不同。关闭此项仍保留大厅隔离。",
 		spanish = "Al activarlo impide que otros jugadores sin el mod se unan cuando hosteas.",
 	},
 	["sentry_multi_part_reachability"] = {
@@ -86,7 +109,7 @@ local replacements = {
 		english = "When attempting to switch weapons during a reload, if the current reload has this much or more remaining (in percent), the switch will be forced immediately. Value is the percent of reload left (1-100).\nQueued weapon switches can be cancelled by attempting to equip the currently selected weapon.",
 		chinese = "在武器换弹时切换武器，倘若剩余换弹时间的百分比值高于该设置的值，那么就会像原版一样立刻开始切换武器，反之，则会在武器换弹完成之后才切换武器。\n\n该值的设置区间为1%-100%，设置为1%将在实质上关闭该功能。\n在延迟期间切换武器可通过再次装备该武器取消。",
 		spanish = "Al intentar de cambiar de arma mientras recargas, si a la recarga actual le queda este valor o menos, se forzará el cambio de arma inmediatamente.\n\nEl valor representa al tiempo de recarga restante en forma de porcentaje (1-100).\nPuedes cancelar el 'cambio de armas en cola' pulsando la tecla del arma que tienes equipada actualmente.", 
-    },
+	},
 	["sws_force_switch_after_loading_shell"] = {
 		english = "Force weapon switch after loading a shell",
 		chinese = "单发装填武器延迟切换优化",
@@ -111,7 +134,7 @@ local replacements = {
 		english = "Weapon switch queue cancelled.",
 		chinese = "武器切换已取消。",
 		spanish = "Cambio de armas en cola cancelado.",
-    },
+	},
 	["sws_melee_cancel_queue"] = {
 		english = "Cancel weapon switch queue with melee",
 		chinese = "用近战取消武器切换延迟",

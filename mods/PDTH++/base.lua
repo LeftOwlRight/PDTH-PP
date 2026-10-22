@@ -27,12 +27,15 @@ local module = DMod:new("PDTH++", {
 		"[_hud]",
 	},
 	includes = {
+		{ "sandbox/networkcompat" },
+		{ "deployables/sentrynetwork" },
 		{ "modlocalization", { type = "localization" } },
 		{ "modoptions", { type = "menu_options" } },
 		{ "modhooks" },
 	},
 	update = { id = "PDTH++_dev", url = "https://pdthpp.neonsynth.de/version.txt" },
 })
+module:add_config_option("pdthpp_sentry_diagnostics", false)
 --Learned this from biglobby mod.
 module:hook("OnModuleLoading", "CheckPPAssetReplacement", function(module)
 	if not DB.create_entry then
@@ -65,6 +68,8 @@ module:hook_post_require("lib/network/matchmaking/networkaccountsteam", "sandbox
 module:hook_post_require("lib/network/matchmaking/networkmatchmakingsteam", "sandbox/networkmatchmakingsteam")
 module:hook_post_require("lib/managers/dlcmanager", "sandbox/dlcmanager")
 module:hook_post_require("lib/network/base/handlers/connectionnetworkhandler", "sandbox/connectionnetworkhandler")
+module:hook_post_require("lib/managers/menumanagerdialogs", "sandbox/compatibilitydialogs")
+module:hook_post_require("lib/setups/gamesetup", "deployables/sentryruntime")
 module:hook_post_require("lib/managers/savefilemanager", "sandbox/savefile")
 --player weapon & NPC base weapon stats.
 module:hook_post_require("lib/tweak_data/playertweakdata", "weapon_stuff/playertweakdata")

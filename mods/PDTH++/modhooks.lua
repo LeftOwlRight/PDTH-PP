@@ -111,81 +111,12 @@ PDTH++ 全局按键与自定义网络消息入口。
 ]]
 
 
--- 步哨网络消息方向约定：
--- PickupRequest / StatusRequest：客机→主机；PickupResult / Status：主机→指定客机；
--- Destroyed：主机→所有客机。每个分支都验证发送方角色，避免客户端伪造权威事件。
+-- Direction, transactions and status throttling are centralized in sentrynetwork.lua.
 module:hook("OnNetworkDataRecv", "PDTHPP_SentryEconomyNetwork", {
-	"PDTHPPSentryPickupRequest",
-	"PDTHPPSentryPickupResult",
-	"PDTHPPSentryDestroyed",
-	"PDTHPPSentryStatus",
-	"PDTHPPSentryStatusRequest",
-}, function(peer, data_type, data)
-	if type(data) ~= "table" or data.module ~= module:id() then
-		return
-	end
-
-	if data_type == "PDTHPPSentryPickupRequest" then
-		if not Network:is_server() or not peer or peer:is_local_user() then
-			return
-		end
-		local unit = module:pdthpp_find_sentry_by_id(data.unit_id)
-		local success = unit and module:pdthpp_host_process_sentry_pickup(peer, unit) or false
-		if not success then
-			DNet:send_to_peer(peer, "PDTHPPSentryPickupResult", {
-				module = module:id(),
-				success = false,
-				unit_id = data.unit_id,
-			}, false, true)
-		end
-
-	elseif data_type == "PDTHPPSentryPickupResult" then
-		if Network:is_server() or not peer or not peer:is_server() then
-			return
-		end
-		local unit = module:pdthpp_find_sentry_by_id(data.unit_id)
-		if alive(unit) then
-			local interaction = unit:interaction()
-			if interaction then
-				interaction._pdthpp_pickup_requested = nil
-			end
-		end
-
-		local plan = module._pdthpp_pending_sentry_pickup_costs[data.unit_id]
-		module._pdthpp_pending_sentry_pickup_costs[data.unit_id] = nil
-		if data.success and plan and module:pdthpp_has_local_sentry_equipment_space()
-			and module:pdthpp_apply_sentry_pickup_cost_plan(plan) then
-			module:pdthpp_add_local_sentry_equipment()
-		end
-
-	elseif data_type == "PDTHPPSentryDestroyed" then
-		if Network:is_server() or not peer or not peer:is_server() then
-			return
-		end
-		local unit = module:pdthpp_find_sentry_by_id(data.unit_id)
-		if alive(unit) then
-			local base = unit:base()
-			if base then
-				base._pdthpp_pickup_in_progress = true
-			end
-			module:pdthpp_destroy_sentry_exact(unit)
-		end
-
-	elseif data_type == "PDTHPPSentryStatus" then
-		if Network:is_server() or not peer or not peer:is_server() then
-			return
-		end
-		module:pdthpp_apply_remote_sentry_status(data)
-
-	elseif data_type == "PDTHPPSentryStatusRequest" then
-		if not Network:is_server() or not peer or peer:is_local_user() then
-			return
-		end
-		local unit = module:pdthpp_find_sentry_by_id(data.unit_id)
-		if alive(unit) then
-			module:pdthpp_send_sentry_status_to_peer(unit, peer)
-		end
-	end
+	"PDTHPPSentryPickupRequest", "PDTHPPSentryPickupCancel", "PDTHPPSentryPickupResult",
+	"PDTHPPSentryDestroyed", "PDTHPPSentryStatus", "PDTHPPSentryStatusRequest", "PDTHPPSentryMissing",
+}, function(peer, kind, data)
+	module:pdthpp_handle_sentry_network(peer, kind, data)
 end)
 
 -- ============================================================================

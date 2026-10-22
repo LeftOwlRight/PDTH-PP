@@ -12,6 +12,10 @@
 ]]
 
 local module = ... or D:module("PDTH++")
+-- Explicit developer opt-in; no per-frame hooks or logging in normal play.
+if D:conf("pdthpp_sentry_diagnostics") ~= true then
+	return
+end
 local required_script = RequiredScript or "<nil>"
 
 local WINDOW_SECONDS = 1

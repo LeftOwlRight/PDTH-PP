@@ -10,9 +10,11 @@ local NetworkMatchMakingSTEAM = module:hook_class("NetworkMatchMakingSTEAM")
 -- Always keep the PDTH++ protocol tag on lobby discovery, even when the host
 -- disables forced join rejection in the mod options. Minor releases can remain
 -- compatible while this protocol stays unchanged.
-local PDTHPP_NETWORK_PROTOCOL = module:version()
+-- Keep the game's own version boundary, including on repeated script loads.
+module._pdthpp_game_build = module._pdthpp_game_build or NetworkMatchMakingSTEAM._BUILD_SEARCH_INTEREST_KEY
 NetworkMatchMakingSTEAM._BUILD_SEARCH_INTEREST_KEY = string.format(
-	"%s-protocol-%s",
+	"%s-%s-protocol-%s",
+	module:pdthpp_game_build(),
 	module:id(),
-	tostring(PDTHPP_NETWORK_PROTOCOL)
+	module.PDTHPP_NETWORK_PROTOCOL
 )

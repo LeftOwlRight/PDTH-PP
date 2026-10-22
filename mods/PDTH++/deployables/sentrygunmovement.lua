@@ -406,7 +406,10 @@ end
 -- 面罩破碎后的继续爆头只在对应补充变量开启时生效。
 function SentryGunMovement:_pdthpp_intentional_headshot(target_unit)
     local tank = is_tank(target_unit)
-    local enabled = tank and SENTRY_TANK_HEADSHOT_ENABLED or SENTRY_HEADSHOT_ENABLED
+    local enabled = SENTRY_HEADSHOT_ENABLED
+    if tank then
+        enabled = SENTRY_TANK_HEADSHOT_ENABLED
+    end
     if not enabled or not self:_pdthpp_roll_for_target(target_unit) then
         return false
     end

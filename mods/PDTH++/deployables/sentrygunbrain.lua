@@ -39,6 +39,7 @@ local AMMO_BAG_UNIT = Idstring("units/equipment/ammo_bag/ammo_bag")
 local DOCTOR_BAG_UNIT = Idstring("units/equipment/doctor_bag/doctor_bag")
 local bullet_slotmask
 local tmp_vec1 = Vector3()
+local tmp_focus_forward = Vector3()
 local tmp_obstruction_target_pos = Vector3()
 local tmp_fire_target_pos = Vector3()
 local mvec3_dir = mvector3.direction
@@ -195,26 +196,26 @@ end
 -- 用于决定候选跳过、停火保持和转火。第四返回值表示真实步哨弹道能否首先命中目标，
 -- 用于把“仍有跟踪回退点”与“当前确实可射击”分开。
 function SentryGunBrain:_pdthpp_target_position(enemy_data, out_pos)
-    local enemy_unit = enemy_data and enemy_data.unit
-    if not is_alive_unit(enemy_unit) then
-        return false, false, false, false
-    end
+	local enemy_unit = enemy_data and enemy_data.unit
+	if not is_alive_unit(enemy_unit) then
+		return false, false, false, false
+	end
 
-    -- SentryGunMovement owns the target-point policy so physical rotation, supported
-    -- obstruction handling and the fire-angle test all use the same body point. The third return
-    -- value means no permitted point is shootable and at least one failed path hit a supported obstruction.
-    if self._ext_movement and self._ext_movement._pdthpp_target_position then
-        return self._ext_movement:_pdthpp_target_position(enemy_unit, out_pos)
-    end
+	-- SentryGunMovement owns the target-point policy so physical rotation, supported
+	-- obstruction handling and the fire-angle test all use the same body point. The third return
+	-- value means no permitted point is shootable and at least one failed path hit a supported obstruction.
+	if self._ext_movement and self._ext_movement._pdthpp_target_position then
+		return self._ext_movement:_pdthpp_target_position(enemy_unit, out_pos)
+	end
 
-    local char_damage = enemy_unit:character_damage()
-    if char_damage and char_damage.shoot_pos_mid then
-        char_damage:shoot_pos_mid(out_pos)
-    else
-        mvector3.set(out_pos, enemy_data.m_com)
-    end
+	local char_damage = enemy_unit:character_damage()
+	if char_damage and char_damage.shoot_pos_mid then
+		char_damage:shoot_pos_mid(out_pos)
+	else
+		mvector3.set(out_pos, enemy_data.m_com)
+	end
 
-    return true, false, false, true
+	return true, false, false, true
 end
 
 -- 统一“当前目标是否仍可保持/候选是否可重新选入”的资格判断。
@@ -319,13 +320,20 @@ function SentryGunBrain:_pdthpp_remove_detected_enemy(enemy_key, enemy_data)
 	end
 end
 
--- 延续原版逐帧“验证目标→重新选敌→检查开火”的更新链。
+-- 每帧验证当前目标和开火，完整敌人扫描最多每 0.1 秒执行一次。
 -- 额外在这里推动最长1秒的状态同步刷新，不使用可能跨关卡存活的延迟定时器。
 function SentryGunBrain:update(unit, t, dt)
 	if Network:is_server() then
 		self:_chk_enemies_valid(t)
 		self:_chk_focus_enemy_valid(t)
-		self:_choose_focus_enemy(t)
+		-- Detection does not need to scan every enemy at rendering frame rate.
+		-- Fire/obstruction and current-target validation still run every update.
+		if not self._pdthpp_next_detection_t or t >= self._pdthpp_next_detection_t
+			or t < (self._pdthpp_last_update_t or t) then
+			self:_choose_focus_enemy(t)
+			self._pdthpp_next_detection_t = t + 0.1
+		end
+		self._pdthpp_last_update_t = t
 	end
 
 	self:_check_fire(t)
@@ -501,7 +509,7 @@ function SentryGunBrain:_choose_focus_enemy(t)
 	local old_focus = self._AI_data.focus_enemy
 	local cam_fwd
 	if old_focus then
-		cam_fwd = tmp_vec1
+		cam_fwd = tmp_focus_forward
 		mvec3_dir(cam_fwd, my_pos, old_focus.m_com)
 	else
 		cam_fwd = self._ext_movement:m_head_fwd()
@@ -640,25 +648,25 @@ function SentryGunBrain:_check_fire(t)
 	end
 
 	if focus_enemy and not self._ext_movement:warming_up(t) then
-		if self._firing then
-			self._unit:weapon():trigger_held(false, true)
-		else
-			if not self:_pdthpp_target_position(focus_enemy, tmp_fire_target_pos) then
-				mvector3.set(tmp_fire_target_pos, focus_enemy.m_com)
-			end
-
-			mvec3_dir(tmp_vec1, self._eye_object_pos, tmp_fire_target_pos)
-			if mvec3_dot(tmp_vec1, self._ext_movement:m_head_fwd()) > tweak_data.weapon.sentry_gun.KEEP_FIRE_ANGLE then
-				self._unit:weapon():start_autofire()
-				self._unit:weapon():trigger_held(false, true)
-				self._firing = true
-				self._unit:network():send("cop_allow_fire")
-
-				-- Remember every target that the sentry actually fired at. If any supported obstruction
-				-- later moves into this firing line, that target receives the same
-				-- 1.5-second hold and 5-second reselect handling.
-				self._pdthpp_obstruction_engaged_key = focus_enemy.key
-			end
+		local valid, _, _, shootable = self:_pdthpp_target_position(focus_enemy, tmp_fire_target_pos)
+		if not valid or not shootable then
+			self:_pdthpp_stop_firing()
+			return
+		end
+		mvec3_dir(tmp_vec1, self._eye_object_pos, tmp_fire_target_pos)
+		if mvec3_dot(tmp_vec1, self._ext_movement:m_head_fwd()) <= tweak_data.weapon.sentry_gun.KEEP_FIRE_ANGLE then
+			self:_pdthpp_stop_firing()
+			return
+		end
+		if not self._firing then
+			self._unit:weapon():start_autofire()
+			self._firing = true
+			self._unit:network():send("cop_allow_fire")
+		end
+		if self._unit:weapon():trigger_held(false, true) then
+			-- The grace applies to every target actually fired upon, including
+			-- a target selected while an existing autofire cycle is running.
+			self._pdthpp_obstruction_engaged_key = focus_enemy.key
 		end
 	else
 		self:_pdthpp_stop_firing()
@@ -670,6 +678,8 @@ local original_set_active = SentryGunBrain.set_active
 function SentryGunBrain:set_active(state)
 	if not state then
 		self:_pdthpp_clear_obstruction_tracking(true)
+		self._pdthpp_next_detection_t = nil
+		self._pdthpp_last_update_t = nil
 	end
 	return original_set_active(self, state)
 end

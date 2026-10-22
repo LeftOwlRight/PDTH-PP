@@ -35,7 +35,7 @@ local EPSILON = 0.000001
 if not module._pdthpp_sentry_ammo_helpers_ready then
 	module._pdthpp_sentry_ammo_helpers_ready = true
 	module._pdthpp_sentry_status_cache = module._pdthpp_sentry_status_cache or {}
-	module._pdthpp_pending_sentry_pickup_costs = module._pdthpp_pending_sentry_pickup_costs or {}
+	-- Pickup transactions are owned by deployables/sentrynetwork.lua.
 	module._pdthpp_sentry_status_request_times = module._pdthpp_sentry_status_request_times or {}
 
 	-- 返回可参与回收费的武器。无效单位、无弹药字段或 pickup_disabled 武器会被排除。
@@ -196,7 +196,8 @@ if not module._pdthpp_sentry_ammo_helpers_ready then
 			if rounds > base._ammo_total then
 				return false
 			end
-			validated[#validated + 1] = { base = base, rounds = rounds }
+			validated[#validated + 1] = { base = base, unit = entry.weapon_unit, rounds = rounds,
+				clip_before = base._ammo_remaining_in_clip }
 		end
 
 		for i = 1, #validated do
@@ -208,9 +209,28 @@ if not module._pdthpp_sentry_ammo_helpers_ready then
 					item.base._ammo_total
 				)
 			end
+			item.clip_after = item.base._ammo_remaining_in_clip
 		end
 
+		plan.paid_items = validated
 		plan.applied = true
+		self:pdthpp_refresh_local_ammo_hud()
+		return true
+	end
+
+	-- Escrow is refunded only on an authoritative rejection, immediate send
+	-- failure, or leaving the session; never on an ambiguous network timeout.
+	function module:pdthpp_refund_sentry_pickup(plan)
+		if not plan or not plan.applied or plan.refunded then return false end
+		for _, item in ipairs(plan.paid_items or {}) do
+			if alive(item.unit) and item.unit:base() == item.base then
+				item.base._ammo_total = math.min(item.base._ammo_max, item.base._ammo_total + item.rounds)
+				if item.clip_before and item.base._ammo_remaining_in_clip == item.clip_after then
+					item.base._ammo_remaining_in_clip = math.min(item.clip_before, item.base._ammo_total)
+				end
+			end
+		end
+		plan.refunded = true
 		self:pdthpp_refresh_local_ammo_hud()
 		return true
 	end
@@ -402,39 +422,31 @@ if not module._pdthpp_sentry_ammo_helpers_ready then
 	-- 客机主动补请求精确状态。用于处理初始广播早于本地网络单位创建的时序问题，
 	-- 并以 1 秒请求冷却避免原版粗略同步频繁触发网络请求。
 	function module:pdthpp_request_exact_sentry_status(unit, force)
-		if not Network:is_client() or not alive(unit) then
-			return false
+		if not Network:is_client() or not alive(unit) then return false end
+		local id = self:pdthpp_sentry_unit_key(unit)
+		if not id then return false end
+		local t = Application:time()
+		local base = unit:base()
+		if not base._pdthpp_status_query then
+			self._pdthpp_sentry_query_sequence = self._pdthpp_sentry_query_sequence + 1
+			base._pdthpp_status_query = self._pdthpp_sentry_epoch .. ":q:" .. self._pdthpp_sentry_query_sequence
 		end
-
-		local unit_id = self:pdthpp_sentry_unit_key(unit)
-		if not unit_id then
-			return false
-		end
-
-		local weapon = unit:weapon()
-		local damage = unit:character_damage()
-		if not force and weapon and weapon._pdthpp_exact_ammo_ratio ~= nil
-			and damage and damage._pdthpp_exact_health_ratio ~= nil then
+		if not force and base._pdthpp_status_t and t - base._pdthpp_status_t < 1.5 then
 			self:pdthpp_register_sentry_with_hud_deployable_spy(unit)
 			return true
 		end
-
-		local t = TimerManager:game():time()
-		local last_request = self._pdthpp_sentry_status_request_times[unit_id]
-		if not force and last_request and t - last_request < 1 then
-			return false
-		end
-
+		local request = self._pdthpp_sentry_status_request_times[id]
+		if request and t - request.t < 1 then return false end
+		if request and request.attempts >= 3 and t - request.t < 5 then return false end
 		local session = managers.network and managers.network:session()
-		local server_peer = session and session:server_peer()
-		if not server_peer then
-			return false
-		end
-
-		self._pdthpp_sentry_status_request_times[unit_id] = t
-		return DNet:send_to_peer(server_peer, "PDTHPPSentryStatusRequest", {
-			module = self:id(),
-			unit_id = unit_id,
+		local peer = session and session:server_peer()
+		if not peer then return false end
+		request = request or { attempts = 0 }
+		if t - (request.t or t) >= 5 then request.attempts = 0 end
+		request.unit, request.t, request.attempts = unit, t, request.attempts + 1
+		self._pdthpp_sentry_status_request_times[id] = request
+		return DNet:send_to_peer(peer, "PDTHPPSentryStatusRequest", {
+			module = self:id(), unit_id = id, query = base._pdthpp_status_query,
 		}, false, false) and true or false
 	end
 
@@ -451,20 +463,7 @@ if not module._pdthpp_sentry_ammo_helpers_ready then
 		end
 
 		if Network:is_client() then
-			local weapon = interaction_ext._unit:weapon()
-			local damage = interaction_ext._unit:character_damage()
-			if (not weapon or weapon._pdthpp_exact_ammo_ratio == nil)
-				or (not damage or damage._pdthpp_exact_health_ratio == nil) then
-				local session = managers.network and managers.network:session()
-				local server_peer = session and session:server_peer()
-				if server_peer and not interaction_ext._pdthpp_status_requested then
-					interaction_ext._pdthpp_status_requested = true
-					DNet:send_to_peer(server_peer, "PDTHPPSentryStatusRequest", {
-						module = self:id(),
-						unit_id = interaction_ext._unit:id(),
-					}, false, false)
-				end
-			end
+			self:pdthpp_request_exact_sentry_status(interaction_ext._unit, false)
 		end
 
 		local text = managers.localization:text(tweak.text_id, {
@@ -496,10 +495,14 @@ if not module._pdthpp_sentry_ammo_helpers_ready then
 	local function sentry_status_payload(module_self, unit)
 		local server_info = unit:base() and unit:base().server_information and unit:base():server_information()
 		local weapon = unit:weapon()
+		local base = unit:base()
+		base._pdthpp_status_revision = (base._pdthpp_status_revision or 0) + 1
 		return {
 			module = module_self:id(),
 			unit_id = unit:id(),
 			owner_peer_id = server_info and server_info.owner_peer_id,
+			instance = module_self:pdthpp_sentry_instance(unit),
+			revision = base._pdthpp_status_revision,
 			ammo_ratio = module_self:pdthpp_get_sentry_ammo_ratio(unit),
 			health_ratio = module_self:pdthpp_get_sentry_health_ratio(unit),
 			-- Absolute sentry ammunition is synchronized for HUD display only.
@@ -510,11 +513,13 @@ if not module._pdthpp_sentry_ammo_helpers_ready then
 	end
 
 	-- 针对单个客机立即回复状态请求，不经过广播节流。
-	function module:pdthpp_send_sentry_status_to_peer(unit, peer)
+	function module:pdthpp_send_sentry_status_to_peer(unit, peer, query)
 		if not Network:is_server() or not alive(unit) or not peer or peer:is_local_user() then
 			return false
 		end
-		return DNet:send_to_peer(peer, "PDTHPPSentryStatus", sentry_status_payload(self, unit), false, false) and true or false
+		local payload = sentry_status_payload(self, unit)
+		payload.query = query
+		return DNet:send_to_peer(peer, "PDTHPPSentryStatus", payload, false, false) and true or false
 	end
 
 	-- 广播状态的节流入口：最短 0.25 秒，细小变化最多合并 1 秒；
@@ -552,7 +557,7 @@ if not module._pdthpp_sentry_ammo_helpers_ready then
 			end
 		end
 
-		self._pdthpp_sentry_status_cache[unit_id] = { t = t, ammo = ammo, health = health }
+		self._pdthpp_sentry_status_cache[unit_id] = { unit = unit, t = t, ammo = ammo, health = health }
 		local weapon = unit:weapon()
 		local damage = unit:character_damage()
 		if weapon then weapon._pdthpp_exact_ammo_ratio = ammo end
@@ -571,6 +576,21 @@ if not module._pdthpp_sentry_ammo_helpers_ready then
 		if not alive(unit) then
 			return false
 		end
+		if type(data.instance) ~= "string" or #data.instance > 100
+			or type(data.revision) ~= "number" or data.revision < 1 then return false end
+		local base = unit:base()
+		-- Bind the identity using this local unit's own query. A late broadcast
+		-- for a previous unit reusing the same network ID cannot bind or delete it.
+		if base._pdthpp_instance then
+			if base._pdthpp_instance ~= data.instance then return false end
+		elseif not base._pdthpp_status_query or data.query ~= base._pdthpp_status_query then
+			return false
+		end
+		if base._pdthpp_instance == data.instance and base._pdthpp_status_revision
+			and data.revision <= base._pdthpp_status_revision then return false end
+		base._pdthpp_instance = data.instance
+		base._pdthpp_status_revision = data.revision
+		base._pdthpp_status_t = Application:time()
 		local ammo = math.max(0, math.min(1, tonumber(data.ammo_ratio) or 0))
 		local health = math.max(0, math.min(1, tonumber(data.health_ratio) or 0))
 		local weapon = unit:weapon()
@@ -626,62 +646,32 @@ if not module._pdthpp_sentry_ammo_helpers_ready then
 		return info and info.owner_peer_id
 	end
 
-	-- The host still authoritatively validates ownership and destroys the exact unit.
-	-- The fixed weapon-ammo charge itself is local and no ammo values cross the network.
-	-- 主机权威回收流程：验证所有者、阻止重复请求、销毁指定单位并通知所有客机。
-	-- 本地主机在此提交扣费；远程客机的武器扣费仍由其本地在成功结果到达后完成。
-	function module:pdthpp_host_process_sentry_pickup(peer, unit, local_cost_plan)
-		if not Network:is_server() or not peer or not alive(unit) then
+	-- Local-host pickup is synchronous. Remote pickups use the idempotent
+	-- transaction handler in sentrynetwork.lua and pay before requesting it.
+	function module:pdthpp_host_process_sentry_pickup(peer, unit, plan)
+		if not Network:is_server() or not peer or not peer:is_local_user()
+			or not self:pdthpp_can_pickup_sentry(peer, unit)
+			or self:pdthpp_sentry_pickup_pending()
+			or not self:pdthpp_has_local_sentry_equipment_space() then return false end
+		plan = plan or self:pdthpp_build_sentry_pickup_cost_plan(
+			managers.player:player_unit(), self:pdthpp_sentry_pickup_cost_ratio(unit))
+		if not self:pdthpp_apply_sentry_pickup_cost_plan(plan) then return false end
+		local id, instance = unit:id(), self:pdthpp_sentry_instance(unit)
+		unit:base()._pdthpp_pickup_in_progress = true
+		if not self:pdthpp_destroy_sentry_exact(unit) then
+			unit:base()._pdthpp_pickup_in_progress = nil
+			self:pdthpp_refund_sentry_pickup(plan)
 			return false
 		end
-
-		local owner_peer_id = self:pdthpp_sentry_owner_peer_id(unit)
-		if owner_peer_id ~= peer:id() then
-			return false
-		end
-
-		local base = unit:base()
-		if not base or base._pdthpp_pickup_in_progress then
-			return false
-		end
-
-		local unit_id = unit:id()
-		if peer:is_local_user() then
-			local player = managers.player and managers.player:player_unit()
-			local plan = local_cost_plan or self:pdthpp_build_sentry_pickup_cost_plan(
-				player,
-				self:pdthpp_sentry_pickup_cost_ratio(unit)
-			)
-			if not plan or not self:pdthpp_has_local_sentry_equipment_space() then
-				return false
-			end
-
-			base._pdthpp_pickup_in_progress = true
-			if not self:pdthpp_apply_sentry_pickup_cost_plan(plan)
-				or not self:pdthpp_add_local_sentry_equipment() then
-				base._pdthpp_pickup_in_progress = nil
-				return false
-			end
-		else
-			base._pdthpp_pickup_in_progress = true
-			DNet:send_to_peer(peer, "PDTHPPSentryPickupResult", {
-				module = self:id(),
-				success = true,
-				unit_id = unit_id,
-			}, false, true)
-		end
-
 		DNet:send_to_peers("PDTHPPSentryDestroyed", {
-			module = self:id(),
-			unit_id = unit_id,
-		}, false, false)
-		local status_key = self:pdthpp_sentry_unit_key(unit)
-		if status_key then
-			self._pdthpp_sentry_status_cache[status_key] = nil
+			module = self:id(), unit_id = id, instance = instance,
+		}, false, true)
+		if not self:pdthpp_add_local_sentry_equipment() then
+			self._pdthpp_sentry_pickup = { committed = true, plan = plan, unit = unit }
 		end
-		self:pdthpp_destroy_sentry_exact(unit)
 		return true
 	end
+
 end
 
 -- 以下挂钩按当前加载的原版脚本分别安装；公共逻辑已由上方一次性保护定义。
@@ -703,6 +693,20 @@ end
 -- SentryGunWeapon：每次实际开火后尝试节流同步；收到原版粗略弹药同步时补请求精确值。
 if RequiredScript == "lib/units/weapons/sentrygunweapon" then
 	local SentryGunWeapon = module:hook_class("SentryGunWeapon")
+
+	-- Drop missed shots after a hitch instead of repaying a timer debt at the
+	-- rendering frame rate. Keep sub-interval rounding so 144 FPS still averages
+	-- the configured rate. Apply on clients too: blank impacts also produce sound.
+	module:pre_hook(SentryGunWeapon, "trigger_held", function(self)
+		local t = self._timer:time()
+		local interval = tweak_data.weapon[self._name_id].auto.fire_rate
+		if t < (self._pdthpp_last_trigger_t or t)
+			or t - (self._pdthpp_last_trigger_t or t) > interval
+			or t - self._next_fire_allowed >= interval then
+			self._next_fire_allowed = t
+		end
+		self._pdthpp_last_trigger_t = t
+	end, true)
 
 	function SentryGunWeapon:ammo_ratio()
 		return module:pdthpp_get_sentry_ammo_ratio(self._unit)
@@ -731,7 +735,9 @@ if RequiredScript == "lib/units/weapons/sentrygunweapon" then
 	-- Preserve fire()'s return value so the original fire-rate timer advances.
 	module:post_hook(SentryGunWeapon, "fire", function(self)
 		if Network:is_server() then
-			module:pdthpp_send_sentry_status(self._unit, false)
+			-- Empty guns stop their brain updates. Flush the terminal state now,
+			-- rather than leaving a throttled change waiting for a future update.
+			module:pdthpp_send_sentry_status(self._unit, self:out_of_ammo())
 		end
 	end, true)
 

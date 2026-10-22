@@ -8,35 +8,13 @@ PDTH++ 标记就会随请求发送。协议号只在网络格式真正不兼容�
 local module = ... or D:module("PDTH++")
 local GenericDLCManager = module:hook_class("GenericDLCManager")
 
--- PDTH++ multiplayer compatibility protocol.
--- Increase this only when network-facing PDTH++ behaviour becomes incompatible.
-local PDTHPP_NETWORK_PROTOCOL = module:version()
-local PDTHPP_PROTOCOL_TOKEN = "pdthpp_protocol_" .. tostring(PDTHPP_NETWORK_PROTOCOL)
-
--- 防止同一加入流程被多次处理时重复追加协议标记。
-local function contains_token(value, wanted)
-	for token in string.gmatch(value or "", "%S+") do
-		if token == wanted then
-			return true
-		end
-	end
-
-	return false
-end
-
--- The vanilla join request already sends a space-separated DLC string.
--- Append a PDTH++ protocol token there so this works with the original client
--- session as well as other mods which replace ClientNetworkSession:request_join_host.
--- 保留全部原版 DLC 标记，只在末尾追加 PDTH++ 协议标记。
+-- Replace stale/duplicate synthetic markers, keeping legitimate DLCs intact.
 module:hook(GenericDLCManager, "dlcs_string", function(self)
 	local dlcs = module:call_orig(GenericDLCManager, "dlcs_string", self) or ""
-	if contains_token(dlcs, PDTHPP_PROTOCOL_TOKEN) then
-		return dlcs
+	local _, _, cleaned = module:pdthpp_clean_protocol_tokens(dlcs)
+	local token = module:pdthpp_protocol_token()
+	if not token then
+		return cleaned
 	end
-
-	if dlcs == "" then
-		return PDTHPP_PROTOCOL_TOKEN
-	end
-
-	return dlcs .. " " .. PDTHPP_PROTOCOL_TOKEN
+	return cleaned == "" and token or cleaned .. " " .. token
 end, true)

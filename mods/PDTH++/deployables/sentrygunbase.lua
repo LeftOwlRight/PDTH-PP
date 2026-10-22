@@ -22,6 +22,7 @@ module:post_hook(SentryGunBase, "set_server_information", function(self)
 end)
 
 module:hook(SentryGunBase, "destroy_sentry", function(self)
+	self._unit:brain():set_active(false)
 	self._unit:sound_source():post_event("turret_spin_stop")
 	--self._unit:brain():set_active(false)
 	self._unit:damage():destroy(self._unit)
@@ -34,4 +35,10 @@ module:hook(SentryGunBase, "destroy_sentry", function(self)
 	self._unit:base():remove()
 	World:delete_unit(self._unit)
 	--self._unit:set_slot(0)	
+end, false)
+
+module:pre_hook(SentryGunBase, "pre_destroy", function(self)
+	if module.pdthpp_forget_sentry then
+		module:pdthpp_forget_sentry(self._unit)
+	end
 end, false)
