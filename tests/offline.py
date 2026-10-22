@@ -166,12 +166,14 @@ class OfflineTests(unittest.TestCase):
 
     def test_release_numbers_do_not_gate(self):
         tokens = []
-        for release in ['1.36.0.8', '1.36.0.9', '2.99.123']:
+        for release in ['1.36.0.8', '1.36.0.9', '2.99.123', 'dev-test']:
             l = lua_runtime();l.globals().release = release
             load(l, 'sandbox/networkcompat.lua')
             l.execute('NetworkMatchMakingSTEAM={_BUILD_SEARCH_INTEREST_KEY="1.23.0"}')
             load(l, 'sandbox/networkmatchmakingsteam.lua')
             key = l.eval('NetworkMatchMakingSTEAM._BUILD_SEARCH_INTEREST_KEY')
+            # Regression for 9a38577: release/protocol strings must not be fed to %d.
+            self.assertEqual(key, '1.23.0-PDTH++-protocol-2')
             load(l, 'sandbox/networkmatchmakingsteam.lua')
             self.assertEqual(key, l.eval('NetworkMatchMakingSTEAM._BUILD_SEARCH_INTEREST_KEY'))
             tokens.append(l.eval('module:pdthpp_protocol_token()'))
@@ -186,6 +188,61 @@ class OfflineTests(unittest.TestCase):
         for value in ['', 'pdthpp_protocol_1.36.0.9', 'pdthpp_protocol_3-game-1.23.0', token + ' pdthpp_protocol_wrong']:
             self.assertFalse(verify(value)[0])
         self.assertEqual(verify('pdthpp_protocol_2-game-1.21.0')[1], 'game')
+
+    def test_protocol_marker_pattern_boundaries(self):
+        l = lua_runtime();load(l, 'sandbox/networkcompat.lua')
+        l.execute('module._pdthpp_game_build="1.23.0"')
+        verify = l.eval('function(s) return module:pdthpp_clean_protocol_tokens(s) end')
+        token = 'pdthpp_protocol_2-game-1.23.0'
+        for whitespace in [' ', '\t', '\r\n', '\v\f']:
+            with self.subTest(whitespace=repr(whitespace)):
+                valid, _, cleaned = verify(whitespace.join(['dlc1', token, token, 'dlc2']))
+                self.assertTrue(valid)
+                self.assertEqual(cleaned, 'dlc1 dlc2')
+        for marker, reason in [
+            ('pdthpp_protocol_2-game-1.22.0', 'game'),
+            ('pdthpp_protocol_3-game-1.23.0', 'protocol'),
+            ('pdthpp_protocol_2-game-1x23x0', 'game'),
+            ('pdthpp_protocol_2XgameX1.23.0', 'protocol'),
+            (token + '-extra', 'protocol'),
+            (token + '.', 'game'),
+            ('pdthpp_protocol_-game-1.23.0', 'protocol'),
+            ('pdthpp_protocol_2-game-', 'protocol'),
+            ('x' + token, 'missing'),
+        ]:
+            with self.subTest(marker=marker):
+                valid, actual_reason, cleaned = verify('dlc1 ' + marker + ' dlc2')
+                self.assertFalse(valid)
+                self.assertEqual(actual_reason, reason)
+                self.assertEqual(cleaned, 'dlc1 dlc2' if reason != 'missing' else 'dlc1 ' + marker + ' dlc2')
+
+    def test_rejection_reason_pattern_and_sender(self):
+        l = lua_runtime()
+        l.execute('''
+        ConnectionNetworkHandler={join_request_reply=function()
+          observed_reason=module._pdthpp_join_rejection and module._pdthpp_join_rejection.reason
+          return 'original-result'
+        end}
+        local host={user_id=function() return 'host' end,ip=function() return 'host-ip' end}
+        managers.network={session=function() return {server_peer=function() return host end} end}
+        sender={ip_at_index=function() return sender_ip end};sender_ip='host-ip'
+        ''')
+        load(l, 'sandbox/connectionnetworkhandler.lua')
+        reply = l.eval('function(mask,user) return ConnectionNetworkHandler:join_request_reply(2,0,1,1,0,mask,user,sender) end')
+        for mask in ['pdthpp_reject_missing', 'pdthpp_reject_protocol', 'pdthpp_reject_game',
+                     'xpdthpp_reject_game', 'pdthpp_reject_gamex', 'pdthpp_reject_game\n',
+                     'pdthpp_reject_', 'pdthpp_reject_game-extra', 'pdthpp_reject_GAME', 0]:
+            with self.subTest(mask=mask):
+                self.assertEqual(reply(mask, 'host'), 'original-result')
+                expected = {'pdthpp_reject_missing': 'missing', 'pdthpp_reject_protocol': 'protocol',
+                            'pdthpp_reject_game': 'game'}.get(mask)
+                self.assertEqual(l.globals().observed_reason, expected)
+                self.assertIsNone(l.eval('module._pdthpp_join_rejection'))
+        reply('pdthpp_reject_game', 'other-user')
+        self.assertIsNone(l.globals().observed_reason)
+        l.globals().sender_ip = 'other-ip'
+        reply('pdthpp_reject_game', 'host')
+        self.assertIsNone(l.globals().observed_reason)
 
     def test_dlc_marker_is_replaced_and_deduplicated(self):
         l=lua_runtime();load(l,'sandbox/networkcompat.lua')
