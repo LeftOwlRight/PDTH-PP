@@ -59,15 +59,5 @@ Detailed sentry logging is off by default. To diagnose an issue, add
 
 ## Verification
 
-`tests/offline.py` exercises the unchanged game weapon functions through dahm's
-real object-hook wrapper, and simulates separate host/client runtimes for message
-loss, cancellation and replay. It requires Python and `lupa` with LuaJIT support,
-plus sibling `pdth-source` and `dahm/release-20261020` references. Override their
-locations with `PDTH_SOURCE` and `DAHM_CORE` if needed:
-
-```text
-python tests/offline.py
-```
-
-These tests do not launch the game. Real asset loading, physics, audio and Steam
-multiplayer still require in-game verification. See [the manual test plan](docs/manual-testing.md).
+Asset loading, physics, audio and Steam multiplayer require in-game verification.
+See [the manual test plan](docs/manual-testing.md).
